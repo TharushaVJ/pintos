@@ -37,6 +37,7 @@
 #include "filesys/filesys.h"
 #include "filesys/fsutil.h"
 #endif
+#define MAX_COMMAND_LENGTH 10
 
 /* Page directory with kernel mappings only. */
 uint32_t *init_page_dir;
@@ -133,7 +134,87 @@ pintos_init (void)
     /* Run actions specified on kernel command line. */
     run_actions (argv);
   } else {
-    // TODO: no command line passed to kernel. Run interactively 
+    /* Run interactive shell. */
+    while(true){
+      printf("CS2042> ");
+      char input_cmd[MAX_COMMAND_LENGTH]; //input buffer for shell
+      int index = 0;
+      while(true){
+        char c = input_getc();
+
+        /* Intiate a null terminator when newline character 
+        (enter key) is given as an input. */
+        if (c == '\r'){ //
+          input_cmd[index] = '\0';
+          printf("\n");
+          break;
+        }
+
+        /* Delete a character at the end of shell input 
+        (backspace key). */
+        else if (c == '\b'){  
+          if (index > 0){
+            index--;
+            printf("\b \b");
+          }
+        }
+
+        else{
+          // Print the character to the interactive shell
+          printf("%c",c);
+          // Insert the character to input buffer 
+          if (index <= MAX_COMMAND_LENGTH){
+            input_cmd[index++] = c;
+          }
+        }        
+      }
+
+      /* Interactive shell commands for project 0*/
+
+      /* "whoami" command, prints the name and index number. */
+      if(strcmp(input_cmd, "whoami")==0){
+        printf("Tharusha - 210726T \n");
+      }
+
+      /* "exit" command, exits the interactive shell. */
+      else if(strcmp(input_cmd, "exit")==0){
+        printf("Exiting interactive shell...Bye!");
+        break;
+      }
+
+      /* "shutdown" command, shuts down the machine (QEMU). */
+      else if(strcmp(input_cmd, "shutdown")==0){
+        shutdown_power_off ();
+      }
+
+      /* "thread" command, prints thread status. */
+      else if(strcmp(input_cmd, "thread")==0){
+        thread_print_stats();
+      }
+
+      /* "priority" command, prints the thread priority. */
+      else if(strcmp(input_cmd, "priority")==0){
+        int priority = thread_get_priority();
+        printf("Priority of the current thread is %d \n", priority);
+      }
+
+      /* "ram" command, prints the amount of RAM available for the OS. */
+      else if(strcmp(input_cmd, "ram")==0){
+        printf("%u kB RAM available for the OS" ,init_ram_pages * PGSIZE / 1024);
+        printf("\n");
+      }
+
+      /* "time" command, prints the elapsed time after boot up. */
+      else if(strcmp(input_cmd, "time")==0){
+        time_t time_elapsed = rtc_get_time();
+        printf("Number of seconds passed since Unix epoch, %lu seconds\n", time_elapsed);
+      }
+
+      /* Any other command */
+      else{
+        printf("Invalid command \n");
+      } 
+    }
   }
 
   /* Finish up. */
