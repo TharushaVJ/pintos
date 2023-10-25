@@ -100,9 +100,13 @@ struct thread
     struct thread *parent;              /* pointer to parent thread */
     struct semaphore wait_exit;         /* semaphores for parent to wait */
     struct semaphore wait_load;    
-    struct thread waiting_child;
-    
-    int exit_status;     
+    struct thread *waiting_child;
+
+    int exit_status;  
+
+    struct list file_list;              /* list of open files */
+    struct file *file;
+    int next_fd;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -112,6 +116,12 @@ struct thread
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };
+
+struct file_descriptor {
+  int fd;                     /* File descriptor */
+  struct file *file;          /* Pointer to the file structure */
+  struct list_elem elem;      /* List element for the thread's file list */
+};
 
 
 /* If false (default), use round-robin scheduler.
@@ -135,7 +145,7 @@ struct thread *thread_current (void);
 tid_t thread_tid (void);
 const char *thread_name (void);
 
-void thread_exit (void) NO_RETURN;
+void thread_exit (int) NO_RETURN;
 void thread_yield (void);
 
 /* Performs some operation on thread t, given auxiliary data AUX. */
@@ -149,5 +159,11 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+void acquire_file_lock(void);
+void release_file_lock(void);
+struct file_descriptor *get_file_descriptor(struct list*, int);
+struct file *get_file(struct list *file_list, int fd);
+void close_files(struct list*);
 
 #endif /* threads/thread.h */

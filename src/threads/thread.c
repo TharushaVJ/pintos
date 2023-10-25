@@ -8,12 +8,12 @@
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
 #include "threads/palloc.h"
+#include "threads/malloc.h"
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #ifdef USERPROG
 #include "userprog/process.h"
-#include "filesys/file.h"
 #endif
 
 /* Random value for struct thread's `magic' member.
@@ -37,6 +37,8 @@ static struct thread *initial_thread;
 
 /* Lock used by allocate_tid(). */
 static struct lock tid_lock;
+
+struct lock file_lock;
 
 /* Stack frame for kernel_thread(). */
 struct kernel_thread_frame 
@@ -72,6 +74,7 @@ static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -91,6 +94,7 @@ thread_init (void)
   ASSERT (intr_get_level () == INTR_OFF);
 
   lock_init (&tid_lock);
+  lock_init (&file_lock);
   list_init (&ready_list);
   list_init (&all_list);
 
@@ -201,6 +205,7 @@ thread_create (const char *name, int priority,
 
   // add the new thread as a child of the current running thread
   list_push_back(&thread_current()->child_list, &t->child_elem);
+  t->exit_status = -1;
   t->parent = thread_current();
   sema_init(&t->wait_exit, 0);
 
@@ -284,12 +289,12 @@ thread_tid (void)
 /* Deschedules the current thread and destroys it.  Never
    returns to the caller. */
 void
-thread_exit (void) 
+thread_exit (int status) 
 {
   ASSERT (!intr_context ());
 
 #ifdef USERPROG
-  process_exit ();
+  process_exit (status);
 #endif
 
   /* Remove thread from all threads list, set our status to dying,
@@ -428,7 +433,7 @@ kernel_thread (thread_func *function, void *aux)
 
   intr_enable ();       /* The scheduler runs with interrupts off. */
   function (aux);       /* Execute the thread function. */
-  thread_exit ();       /* If function() returns, kill the thread. */
+  thread_exit (0);       /* If function() returns, kill the thread. */
 }
 
 /* Returns the running thread. */
@@ -471,6 +476,8 @@ init_thread (struct thread *t, const char *name, int priority)
   t->magic = THREAD_MAGIC;
   
   list_init(&t->child_list);
+  list_init(&t->file_list);
+  t->next_fd = 2;
   
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
@@ -488,6 +495,64 @@ alloc_frame (struct thread *t, size_t size)
 
   t->stack -= size;
   return t->stack;
+}
+
+/* Function to acquire file lock */
+void
+acquire_file_lock(void)
+{
+  lock_acquire(&file_lock);
+}
+
+/* Function to release file lock */
+void
+release_file_lock(void)
+{
+  lock_release(&file_lock);
+}
+
+/* get file decriptor from fd */
+struct file_descriptor *get_file_decriptor(struct list *file_list, int fd)
+{
+  struct list_elem *elem;
+  for(elem = list_begin(file_list); elem != list_end(file_list); elem = list_next(elem))
+  {
+    struct file_descriptor *temp_fd = list_entry(elem, struct file_descriptor, elem);
+    if(temp_fd->fd == fd)
+    {
+      return temp_fd;
+    }
+  }
+
+  return NULL;
+}
+
+/* get file from fd */
+struct file *get_file(struct list *file_list, int fd)
+{
+  struct file_descriptor *temp_fd = get_file_descriptor(file_list, fd);
+
+  if(temp_fd == NULL) {
+    return NULL;
+  }
+  else
+  {
+    return temp_fd->file;
+  }
+}
+
+/* Close files */
+void
+close_files(struct list *f_list)
+{
+  struct list_elem *elem;
+  while(!list_empty(f_list))
+  {
+    elem = list_pop_front(f_list);
+    struct file_descriptor *fd = list_entry(elem, struct file_descriptor, elem);
+    file_close(fd->file);
+    free(fd);
+  }
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

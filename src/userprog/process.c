@@ -67,7 +67,7 @@ start_process (void *file_name_)
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success) {
-    thread_exit ();
+    thread_exit (-1);
   }
   else{
 
@@ -132,7 +132,7 @@ process_exit (int status)
   printf("%s: exit(%d)\n", curr->name, status); // process exit message
 
   struct list_elem *child_elem;
-  struct thread *child;
+  struct thread *child = NULL;
 
   for(child_elem = list_begin(&curr->parent->child_list); child_elem != list_end (&curr->parent->child_list); child_elem = list_next(child_elem))
   {
@@ -145,6 +145,11 @@ process_exit (int status)
   }
 
   child->exit_status = status;
+  acquire_file_lock();
+  file_close(curr->file); // close its files
+  close_files(&curr->file_list);
+  release_file_lock();
+
   if(curr->parent->waiting_child == child)
   {
     sema_up(&child->wait_exit);
@@ -293,7 +298,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   if (t->pagedir == NULL) 
     goto done;
   process_activate ();
-
+  acquire_file_lock();
   /* Open executable file. */
   file = filesys_open (file_name);
   if (file == NULL) 
@@ -382,10 +387,21 @@ load (const char *file_name, void (**eip) (void), void **esp)
   *eip = (void (*) (void)) ehdr.e_entry;
 
   success = true;
+  thread_current()->file = file;
+  file_deny_write(file);
+
 
  done:
   /* We arrive here whether the load is successful or not. */
   file_close (file);
+
+  if(!success)
+  {
+    file_close (file);
+  }
+
+  release_file_lock();
+
   return success;
 }
 
