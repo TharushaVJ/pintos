@@ -17,6 +17,9 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/malloc.h"
+
+#define ARG_MAX 128
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -38,8 +41,8 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  /* Create a new thread to execute fn_copy_tok. */
+  tid = thread_create (fn_copy, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -63,9 +66,12 @@ start_process (void *file_name_)
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
-  if (!success) 
+  if (!success) {
     thread_exit ();
+  }
+  else{
 
+  }
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -88,6 +94,9 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+  while(true){
+    //do nothing - wait forever
+  }
   return -1;
 }
 
@@ -195,7 +204,8 @@ struct Elf32_Phdr
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
 
-static bool setup_stack (void **esp);
+static bool setup_stack (void **esp, int argc, char **args);
+
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -214,6 +224,21 @@ load (const char *file_name, void (**eip) (void), void **esp)
   off_t file_ofs;
   bool success = false;
   int i;
+    
+  char *saveptr;
+  int argc = 0;
+  char *args[ARG_MAX]; //array of arguments
+  char *arg;
+
+  /* Create a copy of file_name for tokens */
+  char *fn_copy = malloc(strlen(file_name) + 1);
+  strlcpy(fn_copy, file_name, strlen(file_name) + 1);
+
+  /* Add the arguments to argv[] using fn_copy */
+  for(arg = strtok_r(fn_copy, " ", &saveptr); arg != NULL; arg = strtok_r(NULL, " ", &saveptr))
+  {
+    args[argc++] = arg;
+  }
 
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
@@ -302,7 +327,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp))
+  if (!setup_stack (esp, argc, args))
     goto done;
 
   /* Start address. */
@@ -424,10 +449,12 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   return true;
 }
 
-/* Create a minimal stack by mapping a zeroed page at the top of
-   user virtual memory. */
+
+/* Create a stack by mapping a zeroed page at the top of
+   user virtual memory. 
+   Then setup the stack for the process. */
 static bool
-setup_stack (void **esp) 
+setup_stack (void **esp, int argc, char **args) 
 {
   uint8_t *kpage;
   bool success = false;
@@ -437,12 +464,58 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE;
+      {
+        *esp = PHYS_BASE; //move stack pointer to top of user space
+        char **argv = malloc(argc*sizeof(char*));; //pointers to arguments
+
+        // push arguments into stack
+        for(int i = argc-1; i >= 0; i--){
+          *esp -= (strlen(args[i]) + 1); // add 1 for the \0 at the end
+          argv[i] = *esp; 
+          memcpy (*esp, args[i], (strlen (args[i]) + 1));
+        }
+
+        // word align
+        while((int) *esp % 4 != 0) {
+          *esp -= sizeof(char);
+          char zero = 0;
+          memcpy (*esp, &zero, sizeof(char));
+        }
+
+        // push null pointer 
+        *esp -= sizeof(char *);
+        *(char *) *esp = 0;
+
+        // push the pointers of arguments (argv[]) into stack
+        for(int i = argc - 1; i >= 0; i--)
+        {
+          *esp -= sizeof(char *);
+          memcpy(*esp, &argv[i], sizeof(char *));
+        }
+
+        // push pointer to argv[]
+        char **argv_ptr = *esp;
+        *esp -= sizeof(char **);
+        memcpy(*esp, &argv_ptr, sizeof(char **));
+
+        // push argc
+        *esp -= sizeof(int);
+        memcpy(*esp, &argc, sizeof(int));
+
+        // push fake return address
+        void *fake_ret = 0;
+        *esp -= sizeof(void *);
+        memcpy(*esp, &fake_ret, sizeof(void *));
+        
+        free (argv);
+      }
       else
         palloc_free_page (kpage);
     }
+
   return success;
 }
+
 
 /* Adds a mapping from user virtual address UPAGE to kernel
    virtual address KPAGE to the page table.
