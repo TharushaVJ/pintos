@@ -92,24 +92,72 @@ start_process (void *file_name_)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
-  while(true){
-    //do nothing - wait forever
+  struct thread *curr = thread_current();
+  struct thread *child;
+  struct list_elem *child_elem;
+
+  /* Find child through tid in the curr process's child list */
+  for(child_elem = list_begin(&curr->child_list); child_elem != list_end(&curr->child_list); child_elem = list_next(child_elem))
+  {
+    thread_yield();
+    child = list_entry(child_elem, struct thread, child_elem);
+    if (child->tid == child_tid) 
+    { 
+      break; 
+    }
   }
+
+  /* Child not found in curr process's child list */
+  if (child_elem == list_end(&curr->child_list)) 
+  { 
+    return -1; 
+  }
+
+  /* Wait for child process to exit */
+  curr->waiting_child = child;
+  sema_down(&child->wait_exit);
+
   return -1;
 }
 
 /* Free the current process's resources. */
 void
-process_exit (void)
+process_exit (int status)
 {
-  struct thread *cur = thread_current ();
+  struct thread *curr = thread_current ();
   uint32_t *pd;
+
+  printf("%s: exit(%d)\n", curr->name, status); // process exit message
+
+  struct list_elem *child_elem;
+  struct thread *child;
+
+  for(child_elem = list_begin(&curr->parent->child_list); child_elem != list_end (&curr->parent->child_list); child_elem = list_next(child_elem))
+  {
+    struct thread *temp = list_entry(child_elem, struct thread, child_elem);
+    if(temp->tid == curr->tid)
+    {
+      child = temp;
+      break;
+    }
+  }
+
+  child->exit_status = status;
+  if(curr->parent->waiting_child == child)
+  {
+    sema_up(&child->wait_exit);
+  }
+  else // if parent is not waiting on child
+  {
+    list_remove(child_elem);
+    free(child);
+  }
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
-  pd = cur->pagedir;
+  pd = curr->pagedir;
   if (pd != NULL) 
     {
       /* Correct ordering here is crucial.  We must set
@@ -119,7 +167,7 @@ process_exit (void)
          directory before destroying the process's page
          directory, or our active page directory will be one
          that's been freed (and cleared). */
-      cur->pagedir = NULL;
+      curr->pagedir = NULL;
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
